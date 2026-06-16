@@ -14,6 +14,24 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "slowapi>=0.1.9",
     "uvicorn>=0.49.0",
+
+    # Vector DB
+    "qdrant-client>=1.9.0",
+
+    # Hybrid retrieval
+    "rank-bm25>=0.2.2",
+
+    # PDF processing
+    "pypdf>=4.0.0",
+    "pdf2image>=1.17.0",
+    "pillow>=10.0.0",
+
+    # Reranking
+    "cohere>=5.0.0",
+
+    # Misc
+    "numpy>=1.26.0",
+    "httpx>=0.27.0",
 ]
 
 [dependency-groups]
