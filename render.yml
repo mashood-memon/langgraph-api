@@ -30,6 +30,12 @@ services:
         sync: false  # Must be set manually
       - key: LANGCHAIN_API_KEY
         sync: false  # Must be set manually
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: VOYAGE_API_KEY
+        sync: false
       - key: LANGCHAIN_TRACING_V2
         value: "true"
       - key: LANGCHAIN_PROJECT

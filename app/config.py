@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     primary_model: str = "gpt-4o-mini"
     fallback_model: str = "gemini-2.5-flash"
     
+    # Vector DB + Embeddings
+    qdrant_url: str
+    qdrant_api_key: str 
+    voyage_api_key: str
+    
     # LangSmith
     langchain_tracing_v2: bool = True
     langchain_api_key: str = ""
@@ -30,6 +35,8 @@ class Settings(BaseSettings):
     rate_limit: str = "20/minute"
     cache_ttl_seconds: int = 300
     max_retries: int = 3
+    relevance_threshold: float = 0.5
+    top_k_chunks: int = 10
     
     
     model_config = {"env_file": ".env", "extra": "ignore"}
