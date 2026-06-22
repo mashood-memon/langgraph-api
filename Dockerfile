@@ -6,7 +6,7 @@ WORKDIR /app
 RUN useradd --create-home appuser && chown appuser:appuser /app
 
 # Install curl (for healthcheck) and uv (fast Python package manager)
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl poppler-utils && rm -rf /var/lib/apt/lists/*
 RUN pip install uv
 
 # Copy dependency files first (Docker layer caching)

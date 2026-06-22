@@ -11,5 +11,5 @@ wheels/
 
 
 .env
-
-BUILD_GUIDE.md
+*.md
+*.excalidraw

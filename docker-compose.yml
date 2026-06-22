@@ -14,3 +14,4 @@ services:
       - LOG_LEVEL=INFO
       - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - VOYAGE_API_KEY=${VOYAGE_API_KEY}
