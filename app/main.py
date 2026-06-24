@@ -32,6 +32,7 @@ from app.security import SecurityPipeline
 from app.cache import ResponseCache
 from app.monitoring import get_logger, MetricsCollector, RequestTimer
 from app.agent import ProductionAgent
+from app.routers.documents import router as documents_router
 
 load_dotenv()
 
@@ -88,6 +89,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.limiter = limiter
+app.include_router(documents_router)
 
 
 # === Exception Handlers ===
