@@ -31,7 +31,7 @@ from app.models import (
 from app.security import SecurityPipeline
 from app.cache import ResponseCache
 from app.monitoring import get_logger, MetricsCollector, RequestTimer
-from app.agent import ProductionAgent
+from app.chat_agent import ProductionAgent
 from app.routers.documents import router as documents_router
 
 load_dotenv()
