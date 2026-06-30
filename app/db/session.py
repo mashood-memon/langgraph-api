@@ -8,6 +8,9 @@ if db_url.startswith("postgres://"):
 elif db_url.startswith("postgresql://"):
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
+# asyncpg expects ?ssl=require instead of ?sslmode=require
+db_url = db_url.replace("sslmode=", "ssl=")
+
 engine = create_async_engine(db_url, pool_pre_ping=True)
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
