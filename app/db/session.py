@@ -1,17 +1,19 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from urllib.parse import urlparse, urlunparse
 from app.config import get_settings
 
 _s = get_settings()
 db_url = _s.database_url
-if db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
-elif db_url.startswith("postgresql://"):
-    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-# asyncpg expects ?ssl=require instead of ?sslmode=require
-db_url = db_url.replace("sslmode=", "ssl=")
+# --- Normalize Neon URL for asyncpg ---
+# Neon gives URLs like: postgresql://user:pass@host/db?sslmode=require&channel_binding=...
+# asyncpg only understands ?ssl=require — everything else causes crashes.
+# So: fix the scheme, strip ALL query params, add only ?ssl=require.
+parsed = urlparse(db_url)
+clean_scheme = "postgresql+asyncpg"
+clean_url = urlunparse(parsed._replace(scheme=clean_scheme, query="ssl=require"))
 
-engine = create_async_engine(db_url, pool_pre_ping=True)
+engine = create_async_engine(clean_url, pool_pre_ping=True)
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
 
