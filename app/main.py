@@ -17,9 +17,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 from langsmith import traceable
 from dotenv import load_dotenv
 
@@ -86,7 +85,7 @@ async def lifespan(app: FastAPI):
     
     
     # === Rate Limiter Setup ===
-limiter = Limiter(key_func=get_remote_address)
+from app.limiter import limiter
 
 # === FastAPI App ===
 app = FastAPI(

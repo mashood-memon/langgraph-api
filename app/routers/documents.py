@@ -5,7 +5,7 @@ import tempfile, os, shutil, logging, hashlib
 from app.ingestion.pipeline import ingest_document
 from app.agent.graph import rag_graph
 from app.config import get_settings
-from app.main import limiter
+from app.limiter import limiter
 from app.db.session import get_session
 from app.db.conversations import create_conversation, save_message, get_recent_messages
 
