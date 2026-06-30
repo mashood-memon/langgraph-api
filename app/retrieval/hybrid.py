@@ -24,7 +24,7 @@ def reciprocal_rank_fusion(ranked_lists: list[list[dict]], id_key: str = "text")
     return [items[i] | {"rrf_score": scores[i]} for i in sorted_ids]
 
 
-async def hybrid_search(query: str, top_k: int = 10) -> dict:
+async def hybrid_search(query: str, doc_ids: list[str] | None = None, top_k: int = 10) -> dict:
     """
     Run semantic vector search + BM25 keyword search, merge via RRF.
     Also runs image search in the same Qdrant collection (filtered by content_type).
@@ -32,23 +32,10 @@ async def hybrid_search(query: str, top_k: int = 10) -> dict:
     Returns {text_results, image_results}.
     """
     query_embedding = embed_query(query)
-
-    # Vector search (text content)
     vector_results = search_text(query_embedding, top_k=top_k)
+    bm25_results = search_bm25(query, doc_ids=doc_ids, top_k=top_k)
 
-    # BM25 keyword search
-    bm25_results = search_bm25(query, top_k=top_k)
-
-    # RRF merge
-    fused_text = reciprocal_rank_fusion(
-        [vector_results, bm25_results],
-        id_key="text"
-    )[:top_k]
-
-    # Image search — same embedding, filtered to image-type payloads
+    fused_text = reciprocal_rank_fusion([vector_results, bm25_results], id_key="text")[:top_k]
     image_results = search_images(query_embedding, top_k=5)
 
-    return {
-        "text_results": fused_text,
-        "image_results": image_results,
-    }
+    return {"text_results": fused_text, "image_results": image_results}

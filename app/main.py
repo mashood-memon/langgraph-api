@@ -29,10 +29,12 @@ from app.models import (
     HealthResponse, MetricsResponse, ErrorResponse,
 )
 from app.security import SecurityPipeline
-from app.cache import ResponseCache
+from app.middleware.cache import get_cached_response, set_cached_response, get_cache_stats
 from app.monitoring import get_logger, MetricsCollector, RequestTimer
 from app.chat_agent import ProductionAgent
 from app.routers.documents import router as documents_router
+from app.db.models import Base
+from app.db.session import engine
 
 load_dotenv()
 
@@ -40,7 +42,6 @@ load_dotenv()
 
 # === Global instances (initialized in lifespan) ===
 security: SecurityPipeline = None
-cache: ResponseCache = None
 metrics: MetricsCollector = None
 agent: ProductionAgent = None
 logger = get_logger()
@@ -48,15 +49,22 @@ logger = get_logger()
 
 # === Lifespan (startup/shutdown) ===
 
+async def init_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Initialize all components on startup, clean up on shutdown.
     This is the modern FastAPI pattern (replaces @app.on_event).
     """
-    global security, cache, metrics, agent
+    global security, metrics, agent
 
     settings = get_settings()
+
+    # Initialize database tables
+    await init_db()
 
     logger.info("Starting production API...", extra={"extra_data": {
         "environment": settings.app_env,
@@ -66,7 +74,6 @@ async def lifespan(app: FastAPI):
 
     # Initialize components
     security = SecurityPipeline()
-    cache = ResponseCache(ttl_seconds=settings.cache_ttl_seconds)
     metrics = MetricsCollector()
     agent = ProductionAgent()
 
@@ -147,7 +154,7 @@ async def chat(request: Request, body: ChatRequest):
             )
 
         # ---- Step 2: Cache Lookup ----
-        cached_response = cache.get(cleaned_message)
+        cached_response = await get_cached_response(cleaned_message)
         if cached_response is not None:
             metrics.record_request(latency_ms=0, cache_hit=True)
             logger.info("Cache hit", extra={"extra_data": {
@@ -183,7 +190,7 @@ async def chat(request: Request, body: ChatRequest):
         security_notes.extend(output_warnings)
 
         # ---- Step 5: Cache Store ----
-        cache.set(cleaned_message, validated_response)
+        await set_cached_response(cleaned_message, validated_response)
 
     # ---- Step 6: Log & Record Metrics ----
     input_tokens = int(len(cleaned_message.split()) * 1.3)
@@ -228,7 +235,6 @@ async def health():
     checks = {
         "agent": agent is not None,
         "security": security is not None,
-        "cache": cache is not None,
     }
 
     all_healthy = all(checks.values())
@@ -250,4 +256,4 @@ async def get_metrics():
 @app.get("/cache/stats")
 async def cache_stats():
     """Cache performance statistics."""
-    return cache.stats
+    return await get_cache_stats()

@@ -18,10 +18,12 @@ class Settings(BaseSettings):
     primary_model: str = "gpt-4o-mini"
     fallback_model: str = "gemini-2.5-flash"
     
-    # Vector DB + Embeddings
+    # Vector DB + Embeddings + Postgres + Redis
     qdrant_url: str
     qdrant_api_key: str 
     voyage_api_key: str
+    database_url: str
+    redis_url: str
     
     # LangSmith
     langchain_tracing_v2: bool = True
@@ -37,6 +39,7 @@ class Settings(BaseSettings):
     max_retries: int = 3
     relevance_threshold: float = 0.5
     top_k_chunks: int = 10
+    upload_api_key: str              # required — no default, must be in .env
     
     
     model_config = {"env_file": ".env", "extra": "ignore"}

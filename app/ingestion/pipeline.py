@@ -1,17 +1,15 @@
 import uuid
 from .chunker import chunk_document
 from .voyage_embed import embed_text, embed_images, render_pdf_pages
-from .bm25_index import build_index
 from app.vectorstore.qdrant_client import ensure_collections, upsert_text_chunk, upsert_image_page
 
 
-async def ingest_document(pdf_path: str, filename: str) -> dict:
+async def ingest_document(pdf_path: str, filename: str, file_hash: str = "") -> dict:
     """
     Full ingestion pipeline:
     1. Chunk text with contextual summaries
     2. Embed text chunks via Voyage → Qdrant (content_type="text")
-    3. Build BM25 index
-    4. Render pages as images, embed via Voyage → Qdrant (content_type="image")
+    3. Render pages as images, embed via Voyage → Qdrant (content_type="image")
     Both embedding calls use the same model/space — one collection, one client.
     """
     ensure_collections()
@@ -19,9 +17,6 @@ async def ingest_document(pdf_path: str, filename: str) -> dict:
 
     # --- Text path ---
     chunks = chunk_document(pdf_path, doc_id)
-    
-    # Build BM25 index (in-memory + disk)
-    build_index(chunks)
     
     texts = [c["chunk_text"] for c in chunks]
     text_embeddings = embed_text(texts, input_type="document")
@@ -33,6 +28,7 @@ async def ingest_document(pdf_path: str, filename: str) -> dict:
             metadata={
                 "doc_id": doc_id,
                 "filename": filename,
+                "file_hash": file_hash,
                 "page_num": chunk["page_num"],
                 "chunk_index": chunk["chunk_index"],
                 "raw_text": chunk["raw_text"],
@@ -49,6 +45,7 @@ async def ingest_document(pdf_path: str, filename: str) -> dict:
             metadata={
                 "doc_id": doc_id,
                 "filename": filename,
+                "file_hash": file_hash,
                 "page_num": page_num,
             }
         )
@@ -56,6 +53,7 @@ async def ingest_document(pdf_path: str, filename: str) -> dict:
     return {
         "doc_id": doc_id,
         "filename": filename,
+        "file_hash": file_hash,
         "chunks_indexed": len(chunks),
         "pages_indexed": len(image_embeddings),
     }

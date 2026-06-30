@@ -40,5 +40,11 @@ services:
         value: "true"
       - key: LANGCHAIN_PROJECT
         value: production-api
+      - key: DATABASE_URL
+        sync: false  # Must be set manually in Render Dashboard
+      - key: REDIS_URL
+        sync: false  # Must be set manually in Render Dashboard
+      - key: UPLOAD_API_KEY
+        sync: false  # Must be set manually in Render Dashboard
     healthCheckPath: /health
     autoDeploy: true

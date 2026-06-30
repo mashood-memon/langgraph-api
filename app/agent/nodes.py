@@ -11,6 +11,7 @@ MAX_RETRIES = 3   # hard cap — controls API cost
 
 class RAGState(TypedDict):
     query: str
+    chat_history: list[dict]      # [{"role": "user"/"assistant", "content": "..."}]
     rewritten_query: str | None
     retrieved_docs: list[dict]
     image_results: list[dict]
@@ -18,6 +19,41 @@ class RAGState(TypedDict):
     retry_count: int
     answer: str | None
     doc_context: str
+    needs_retrieval: bool          # set by classify_intent_node
+
+
+async def classify_intent_node(state: RAGState) -> RAGState:
+    """
+    Lightweight intent check: does this query need document retrieval,
+    or can we answer from conversation history alone?
+    """
+    history = state.get("chat_history", [])[-4:]
+    history_text = (
+        "\n".join(f"{m['role']}: {m['content']}" for m in history)
+        if history else "(none)"
+    )
+
+    prompt = (
+        f"Recent conversation:\n{history_text}\n\n"
+        f"New user message: {state['query']}\n\n"
+        "Does this message require searching external documents to answer, "
+        "or can it be answered from the conversation context alone?\n"
+        "Examples that do NOT need retrieval: greetings, thanks, chitchat, "
+        "follow-up opinions, clarifications about what was just said.\n"
+        "Examples that DO need retrieval: factual questions, requests for "
+        "specific information, technical queries.\n\n"
+        "Reply with exactly one word: RETRIEVE or RESPOND"
+    )
+    resp = await grader_llm.ainvoke(prompt)
+    decision = resp.content.strip().upper()
+    return {**state, "needs_retrieval": decision != "RESPOND"}
+
+
+def route_after_intent(state: RAGState) -> str:
+    """Router: skip retrieval if the query doesn't need it."""
+    if state.get("needs_retrieval", True):
+        return "retrieve"
+    return "generate"
 
 
 async def retrieve_node(state: RAGState) -> RAGState:
@@ -56,12 +92,14 @@ async def grade_node(state: RAGState) -> RAGState:
 
 
 async def rewrite_query_node(state: RAGState) -> RAGState:
-    """Rewrite the query to improve retrieval on next attempt."""
+    history = state.get("chat_history", [])[-4:]   
+    history_text = "\n".join(f"{m['role']}: {m['content']}" for m in history)
+
     prompt = (
-        f"The following query returned irrelevant technical documents.\n"
-        f"Original query: {state['query']}\n"
-        f"Rewrite it to be more specific and retrieval-friendly. "
-        f"Focus on technical identifiers, error codes, or system names. "
+        f"Conversation so far:\n{history_text}\n\n"
+        f"Current query: {state['query']}\n\n"
+        f"The current query may reference earlier turns (e.g. 'it', 'that error', 'the same service'). "
+        f"Rewrite it to be fully self-contained and retrieval-friendly, resolving any such references. "
         f"Return ONLY the rewritten query."
     )
     resp = await rewriter_llm.ainvoke(prompt)
@@ -73,23 +111,30 @@ async def rewrite_query_node(state: RAGState) -> RAGState:
 
 
 async def generate_node(state: RAGState) -> RAGState:
-    """Generate final answer from retrieved context."""
-    context = "\n\n".join(
-        d.get("text", d.get("raw_text", ""))
-        for d in state["retrieved_docs"][:6]
-    )
-    has_images = len(state.get("image_results", [])) > 0
+    # Only keep docs that clear a per-doc relevance bar, then cap at 6
+    MIN_RRF_SCORE = 0.015
+    relevant_docs = [
+        d for d in state.get("retrieved_docs", [])
+        if d.get("rrf_score", 0) >= MIN_RRF_SCORE
+    ][:6]
 
-    image_note = "[Note: Relevant diagram/image pages were also retrieved and considered.]\n\n" if has_images else ""
+    if not relevant_docs:
+        context = "(no relevant documents found)"
+    else:
+        context = "\n\n".join(
+            d.get("text", d.get("raw_text", "")) for d in relevant_docs
+        )
+
+    history = state.get("chat_history", [])[-4:]
+    history_text = "\n".join(f"{m['role']}: {m['content']}" for m in history) if history else "(no prior conversation)"
 
     prompt = (
-        f"You are a technical documentation expert.\n\n"
+        f"Conversation so far:\n{history_text}\n\n"
         f"Context from retrieved documents:\n{context}\n\n"
-        f"{image_note}"
-        f"Query: {state['query']}\n\n"
-        f"Answer concisely and precisely. If information is missing, say so."
+        f"Current query: {state['query']}\n\n"
+        f"Answer concisely and precisely, taking the conversation above into account "
+        f"if the query refers back to it. If information is missing, say so."
     )
-
     resp = await grader_llm.ainvoke(prompt)
     return {**state, "answer": resp.content}
 
