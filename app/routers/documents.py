@@ -1,19 +1,19 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Security, Depends, Request
 from fastapi.security import APIKeyHeader
 from fastapi.responses import JSONResponse
-import tempfile, os, shutil, logging, hashlib
+import tempfile, os, shutil, logging, hashlib, uuid
 from app.ingestion.pipeline import ingest_document
 from app.agent.graph import rag_graph
 from app.config import get_settings
 from app.limiter import limiter
-from app.db.session import get_session
+from app.db.session import get_session, async_session
 from app.db.conversations import create_conversation, save_message, get_recent_messages
+from app.db.models import Document
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
-
-MAX_SIZE_MB = 20
 
 # --- API Key auth (upload only) ---
 api_key_header = APIKeyHeader(name="X-API-Key")
@@ -48,25 +48,38 @@ def _file_already_ingested(file_hash: str) -> bool:
     return len(points) > 0
 
 
-async def ingest_and_cleanup(tmp_path: str, filename: str, file_hash: str):
+async def ingest_and_cleanup(tmp_path: str, filename: str, file_hash: str, doc_id: str):
     """
     Runs AFTER the HTTP response is already sent to the client.
     Wrapper exists to guarantee temp file cleanup even if ingestion crashes.
     """
     try:
-        stats = await ingest_document(tmp_path, filename, file_hash=file_hash)
+        stats = await ingest_document(tmp_path, filename, doc_id, file_hash=file_hash)
+        async with async_session() as session:
+            doc = await session.get(Document, doc_id)
+            if doc:
+                doc.status = "ready"
+                doc.pipeline_stats = stats
+                doc.page_count = stats.get("pages_indexed", 0)
+                await session.commit()
         logger.info(f"Ingestion complete: {filename}", extra={"stats": stats})
     except Exception as e:
         logger.error(f"Ingestion failed for {filename}: {e}")
+        async with async_session() as session:
+            doc = await session.get(Document, doc_id)
+            if doc:
+                doc.status = "error"
+                await session.commit()
     finally:
         os.unlink(tmp_path)   # always clean up the temp file
 
 
 @router.post("/upload", status_code=202, dependencies=[Depends(verify_upload_key)])
 @limiter.limit("5/minute")
-async def upload_document(request: Request, file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
-    if file.size and file.size > MAX_SIZE_MB * 1024 * 1024:
-        raise HTTPException(status_code=413, detail=f"File exceeds {MAX_SIZE_MB}MB limit.")
+async def upload_document(request: Request, file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks(), session=Depends(get_session)):
+    settings = get_settings()
+    if file.size and file.size > settings.max_size_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"File exceeds {settings.max_size_mb}MB limit.")
 
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDFs supported.")
@@ -87,13 +100,32 @@ async def upload_document(request: Request, file: UploadFile = File(...), backgr
                 content={"status": "duplicate", "detail": "This file has already been ingested."},
             )
 
+        doc_id = str(uuid.uuid4())
+        new_doc = Document(
+            id=doc_id,
+            filename=file.filename,
+            size_mb=round(file.size / (1024 * 1024), 2) if file.size else 0.0,
+            status="processing"
+        )
+        session.add(new_doc)
+        await session.commit()
+        await session.refresh(new_doc)
+
         # Queue ingestion to run AFTER this response is sent
-        background_tasks.add_task(ingest_and_cleanup, tmp_path, file.filename, file_hash)
+        background_tasks.add_task(ingest_and_cleanup, tmp_path, file.filename, file_hash, doc_id)
 
         # Client gets this immediately — doesn't wait for ingestion
         return JSONResponse(
             status_code=202,
-            content={"status": "queued", "filename": file.filename},
+            content={
+                "docId": str(new_doc.id),
+                "filename": new_doc.filename,
+                "pageCount": new_doc.page_count,
+                "sizeMb": new_doc.size_mb,
+                "uploadedAt": new_doc.uploaded_at.isoformat() if new_doc.uploaded_at else None,
+                "status": new_doc.status,
+                "pipelineStats": new_doc.pipeline_stats
+            },
         )
     except Exception as e:
         if tmp_path and os.path.exists(tmp_path):
@@ -159,11 +191,16 @@ async def query_documents(payload: dict, session=Depends(get_session)):
         await save_message(session, conversation_id, role="assistant", content=result["answer"], sources=sources)
 
         response = {
-            "conversation_id": conversation_id,
+            "conversationId": str(conversation_id),
             "answer": result["answer"],
-            "query_used": result.get("rewritten_query") or query,
-            "retries": result["retry_count"],
             "sources": sources,
+            "traceData": {
+                "retries": result["retry_count"],
+                "maxRetries": get_settings().max_retries,
+                "relevanceScore": result["relevance_score"],
+                "rewrittenQuery": result.get("rewritten_query"),
+                "steps": result.get("steps", [])
+            }
         }
 
         # Only cache if it was a context-free, first-turn query
@@ -177,6 +214,30 @@ async def query_documents(payload: dict, session=Depends(get_session)):
         raise HTTPException(
             status_code=500,
             detail="An error occurred while processing your query. Please try again."
+        )
+
+
+@router.get("")
+async def get_documents(session=Depends(get_session)):
+    try:
+        result = await session.execute(select(Document).order_by(Document.uploaded_at.desc()))
+        docs = result.scalars().all()
+        return [
+            {
+                "docId": str(d.id),
+                "filename": d.filename,
+                "pageCount": d.page_count,
+                "sizeMb": d.size_mb,
+                "uploadedAt": d.uploaded_at.isoformat() if d.uploaded_at else None,
+                "status": d.status,
+                "pipelineStats": d.pipeline_stats
+            } for d in docs
+        ]
+    except Exception as e:
+        logger.error(f"Failed to fetch documents: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to fetch documents. Please try again."
         )
 
 

@@ -25,7 +25,13 @@ async def get_recent_messages(session: AsyncSession, conversation_id: str, limit
         .limit(limit)
     )
     messages = result.scalars().all()
-    return [{"role": m.role, "content": m.content} for m in reversed(messages)]
+    return [{
+        "id": str(m.id),
+        "role": m.role,
+        "content": m.content,
+        "sources": m.sources,
+        "createdAt": m.created_at.isoformat() if m.created_at else None
+    } for m in reversed(messages)]
 
 
 async def list_conversations(session: AsyncSession, user_id: str) -> list[dict]:
@@ -33,4 +39,4 @@ async def list_conversations(session: AsyncSession, user_id: str) -> list[dict]:
         select(Conversation).where(Conversation.user_id == user_id).order_by(Conversation.updated_at.desc())
     )
     convs = result.scalars().all()
-    return [{"id": str(c.id), "title": c.title, "updated_at": c.updated_at.isoformat()} for c in convs]
+    return [{"id": str(c.id), "title": c.title, "updatedAt": c.updated_at.isoformat() if c.updated_at else None} for c in convs]

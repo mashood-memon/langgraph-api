@@ -4,7 +4,7 @@ from .voyage_embed import embed_text, embed_images, render_pdf_pages
 from app.vectorstore.qdrant_client import ensure_collections, upsert_text_chunk, upsert_image_page
 
 
-async def ingest_document(pdf_path: str, filename: str, file_hash: str = "") -> dict:
+async def ingest_document(pdf_path: str, filename: str, doc_id: str, file_hash: str = "") -> dict:
     """
     Full ingestion pipeline:
     1. Chunk text with contextual summaries
@@ -13,7 +13,6 @@ async def ingest_document(pdf_path: str, filename: str, file_hash: str = "") -> 
     Both embedding calls use the same model/space — one collection, one client.
     """
     ensure_collections()
-    doc_id = str(uuid.uuid4())
 
     # --- Text path ---
     chunks = chunk_document(pdf_path, doc_id)

@@ -3,10 +3,10 @@ from app.retrieval.hybrid import hybrid_search
 from typing import TypedDict, Annotated
 import operator
 
+from app.config import get_settings
+
 grader_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 rewriter_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
-
-MAX_RETRIES = 3   # hard cap — controls API cost
 
 
 class RAGState(TypedDict):
@@ -20,6 +20,7 @@ class RAGState(TypedDict):
     answer: str | None
     doc_context: str
     needs_retrieval: bool          # set by classify_intent_node
+    steps: Annotated[list[dict], operator.add]
 
 
 async def classify_intent_node(state: RAGState) -> RAGState:
@@ -46,7 +47,11 @@ async def classify_intent_node(state: RAGState) -> RAGState:
     )
     resp = await grader_llm.ainvoke(prompt)
     decision = resp.content.strip().upper()
-    return {**state, "needs_retrieval": decision != "RESPOND"}
+    return {
+        **state,
+        "needs_retrieval": decision != "RESPOND",
+        "steps": [{"name": "classify_intent", "status": "normal"}]
+    }
 
 
 def route_after_intent(state: RAGState) -> str:
@@ -60,10 +65,12 @@ async def retrieve_node(state: RAGState) -> RAGState:
     """Run hybrid search with current query (or rewritten query if available)."""
     active_query = state.get("rewritten_query") or state["query"]
     results = await hybrid_search(active_query, top_k=10)
+    status = "retry" if state.get("retry_count", 0) > 0 else "normal"
     return {
         **state,
         "retrieved_docs": results["text_results"],
         "image_results": results["image_results"],
+        "steps": [{"name": "retrieve", "status": status}]
     }
 
 
@@ -88,7 +95,12 @@ async def grade_node(state: RAGState) -> RAGState:
     except ValueError:
         score = 0.5   # default if LLM doesn't comply
 
-    return {**state, "relevance_score": min(max(score, 0.0), 1.0)}
+    status = "retry" if state.get("retry_count", 0) > 0 else "normal"
+    return {
+        **state,
+        "relevance_score": min(max(score, 0.0), 1.0),
+        "steps": [{"name": "grade", "status": status}]
+    }
 
 
 async def rewrite_query_node(state: RAGState) -> RAGState:
@@ -107,6 +119,7 @@ async def rewrite_query_node(state: RAGState) -> RAGState:
         **state,
         "rewritten_query": resp.content.strip(),
         "retry_count": state.get("retry_count", 0) + 1,
+        "steps": [{"name": "rewrite", "status": "retry"}]
     }
 
 
@@ -136,14 +149,20 @@ async def generate_node(state: RAGState) -> RAGState:
         f"if the query refers back to it. If information is missing, say so."
     )
     resp = await grader_llm.ainvoke(prompt)
-    return {**state, "answer": resp.content}
+    status = "retry" if state.get("retry_count", 0) > 0 else "normal"
+    return {
+        **state, 
+        "answer": resp.content,
+        "steps": [{"name": "generate", "status": status}]
+    }
 
 
 def route_after_grade(state: RAGState) -> str:
     """Router: decide whether to generate or rewrite based on relevance score."""
     score = state.get("relevance_score", 0)
     retries = state.get("retry_count", 0)
+    settings = get_settings()
 
-    if score >= 0.5 or retries >= MAX_RETRIES:
+    if score >= settings.relevance_threshold or retries >= settings.max_retries:
         return "generate"
     return "rewrite"

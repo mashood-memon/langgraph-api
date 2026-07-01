@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     max_retries: int = 3
     relevance_threshold: float = 0.5
     top_k_chunks: int = 10
+    max_size_mb: int = 20
     upload_api_key: str              # required — no default, must be in .env
     
     
