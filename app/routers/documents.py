@@ -7,7 +7,7 @@ from app.agent.graph import rag_graph
 from app.config import get_settings
 from app.limiter import limiter
 from app.db.session import get_session, async_session
-from app.db.conversations import create_conversation, save_message, get_recent_messages
+from app.db.conversations import create_conversation, save_message, get_recent_messages, list_conversations
 from app.db.models import Document
 from sqlalchemy import select
 
